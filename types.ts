@@ -1,4 +1,3 @@
-
 export enum Attribute {
   FOR = 'FOR',
   DES = 'DES',
@@ -48,6 +47,7 @@ export interface Message {
   type: 'chat' | 'roll' | 'system' | 'ai';
   total?: number;
   details?: string;
+  image?: string; // Base64 ou URL da imagem enviada no chat
 }
 
 export interface InventoryItem {

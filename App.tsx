@@ -43,13 +43,6 @@ const calcularDanoCritico = (dadoDano: number, multiplicador: number, bonusFixo:
 
 const soltarNoGrid = (rawCoord: number, gridSize: number): number => Math.round(rawCoord / gridSize);
 
-const calcularDistanciaT20 = (q1: {x: number, y: number}, q2: {x: number, y: number}): { metros: number, quadrados: number } => {
-  const dx = Math.abs(q1.x - q2.x);
-  const dy = Math.abs(q1.y - q2.y);
-  const quadrados = Math.max(dx, dy); 
-  return { metros: quadrados * 1.5, quadrados };
-};
-
 export default function App() {
   const [isJoined, setIsJoined] = useState(false);
   const [userName, setUserName] = useState('');
@@ -84,7 +77,6 @@ export default function App() {
     brushSize: 60
   });
   const [tokens, setTokens] = useState<Token[]>([]);
-  const [isRevealing, setIsRevealing] = useState(false);
 
   // Quick Summon State
   const [isQuickSummonOpen, setIsQuickSummonOpen] = useState(false);
@@ -92,11 +84,10 @@ export default function App() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<HTMLDivElement>(null);
-  const fogCanvasRef = useRef<HTMLCanvasElement>(null);
   const channelRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const chatImageRef = useRef<HTMLInputElement>(null);
 
-  // Check for room code in URL on mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const room = params.get('room');
@@ -151,12 +142,17 @@ export default function App() {
     }
   }, []);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const addLog = useCallback((text: string, type: Message['type'] = 'chat', total?: number, details?: string, image?: string) => {
+    const msg: Message = { id: Math.random().toString(36).substr(2, 9), user: userName || 'Herói', text, type, total, details, image, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+    broadcastAction('chat_msg', msg);
+  }, [userName, broadcastAction]);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, mode: 'map' | 'chat') => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     if (file.size > 2 * 1024 * 1024) {
-       alert("Imagem muito grande! Tente uma com menos de 2MB para garantir a sincronização.");
+       alert("Imagem muito grande! Tente uma com menos de 2MB.");
        return;
     }
 
@@ -164,19 +160,24 @@ export default function App() {
     reader.onload = (event) => {
       const result = event.target?.result as string;
       if (result) {
-        setConfigMapa(p => ({ ...p, backgroundImage: result }));
-        broadcastAction('map_update', { backgroundImage: result });
-        addLog("Alterou o mapa da batalha.", "system");
+        if (mode === 'map') {
+          setConfigMapa(p => ({ ...p, backgroundImage: result }));
+          broadcastAction('map_update', { backgroundImage: result });
+          addLog("Alterou o mapa da batalha.", "system");
+        } else {
+          addLog("enviou uma imagem", "chat", undefined, undefined, result);
+        }
       }
     };
     reader.readAsDataURL(file);
+    e.target.value = ''; // Reset input
   };
 
   const handleInvite = () => {
     const url = new URL(window.location.href);
     url.searchParams.set('room', roomCode);
     navigator.clipboard.writeText(url.toString());
-    addLog("Link de convite copiado para a área de transferência!", "system");
+    addLog("Link de convite copiado!", "system");
   };
 
   const totalDefense = useMemo(() => calcularDefesa(char.attrs[Attribute.DES], char.armorBonus, char.shieldBonus, char.armorType), [char.attrs, char.armorBonus, char.shieldBonus, char.armorType]);
@@ -189,11 +190,6 @@ export default function App() {
   }, []);
 
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages]);
-
-  const addLog = useCallback((text: string, type: Message['type'] = 'chat', total?: number, details?: string) => {
-    const msg: Message = { id: Math.random().toString(36).substr(2, 9), user: userName || 'Herói', text, type, total, details, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
-    broadcastAction('chat_msg', msg);
-  }, [userName, broadcastAction]);
 
   const rollDice = (label: string, attrKey: Attribute) => {
     const die = Math.floor(Math.random() * 20) + 1;
@@ -242,7 +238,6 @@ export default function App() {
       }
     } catch (e) {
       addLog('A Tormenta interfere na visão...', 'system');
-      console.error(e);
     } finally { 
       setAiLoading(false); 
       setAiInput('');
@@ -290,100 +285,24 @@ export default function App() {
           </div>
           <div className="flex gap-2 pointer-events-auto">
             <div className="bg-[#0a0a0a]/95 backdrop-blur-xl p-1 rounded-2xl border border-[#d4af37]/30 shadow-2xl flex items-center gap-1">
-              {/* INVITE PLAYERS BUTTON */}
-              <button 
-                onClick={handleInvite} 
-                className="p-2.5 rounded-xl text-[#d4af37] transition-all hover:text-white hover:bg-[#d4af37]/20 gold-glow"
-                title="Convidar Jogadores (Copia link)"
-              >
-                <UserPlus size={18}/>
-              </button>
-              <div className="w-[1px] h-4 bg-white/10" />
+              <button onClick={handleInvite} className="p-2.5 rounded-xl text-[#d4af37] transition-all hover:text-white hover:bg-[#d4af37]/20 gold-glow"><UserPlus size={18}/></button>
               {isMaster && (
                 <>
-                  <button 
-                    onClick={() => setIsQuickSummonOpen(!isQuickSummonOpen)} 
-                    className={`p-2.5 rounded-xl transition-all ${isQuickSummonOpen ? 'bg-purple-700 text-white' : 'text-purple-400 hover:text-white hover:bg-purple-900/40'}`}
-                    title="Invocação Rápida de Monstro (AI)"
-                  >
-                    <Skull size={18} className={aiLoading && isQuickSummonOpen ? 'animate-pulse' : ''}/>
-                  </button>
-                  <div className="w-[1px] h-4 bg-white/5" />
-                  <button onClick={() => { const newFog = !configMapa.fogEnabled; setConfigMapa(p => ({...p, fogEnabled: newFog})); broadcastAction('map_update', { fogEnabled: newFog }); }} className={`p-2.5 rounded-xl transition-all ${configMapa.fogEnabled ? 'bg-[#8b0000] text-white' : 'text-zinc-500 hover:text-white'}`}>{configMapa.fogEnabled ? <EyeOff size={18}/> : <Eye size={18}/>}</button>
-                  <div className="w-[1px] h-4 bg-white/5" />
+                  <div className="w-[1px] h-4 bg-white/10" />
+                  <button onClick={() => setIsQuickSummonOpen(!isQuickSummonOpen)} className={`p-2.5 rounded-xl transition-all ${isQuickSummonOpen ? 'bg-purple-700 text-white' : 'text-purple-400 hover:text-white hover:bg-purple-900/40'}`}><Skull size={18}/></button>
                 </>
               )}
-              <div className="flex items-center gap-1">
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  onChange={handleFileUpload} 
-                  accept="image/*" 
-                  className="hidden" 
-                />
-                <button 
-                  className="p-2.5 rounded-xl text-[#d4af37] transition-all hover:text-white hover:bg-white/5" 
-                  title="Upload do Celular/PC"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <Upload size={20}/>
-                </button>
-                <div className="w-[1px] h-4 bg-white/5" />
-                <button 
-                  className="p-2.5 rounded-xl text-[#d4af37] transition-all hover:text-white hover:bg-white/5" 
-                  title="Link do Mapa"
-                  onClick={() => { const url = prompt("Link do Mapa:"); if(url) { setConfigMapa(p => ({...p, backgroundImage: url})); broadcastAction('map_update', { backgroundImage: url }); }}}
-                >
-                  <MapIcon size={20}/>
-                </button>
-              </div>
+              <div className="w-[1px] h-4 bg-white/10" />
+              <input type="file" ref={fileInputRef} onChange={e => handleFileUpload(e, 'map')} accept="image/*" className="hidden" />
+              <button className="p-2.5 rounded-xl text-[#d4af37] transition-all hover:text-white hover:bg-white/5" onClick={() => fileInputRef.current?.click()}><Upload size={20}/></button>
+              <button className="p-2.5 rounded-xl text-[#d4af37] transition-all hover:text-white hover:bg-white/5" onClick={() => { const url = prompt("Link do Mapa:"); if(url) { setConfigMapa(p => ({...p, backgroundImage: url})); broadcastAction('map_update', { backgroundImage: url }); }}}><MapIcon size={20}/></button>
             </div>
           </div>
         </div>
 
-        {/* QUICK SUMMON OVERLAY */}
-        <AnimatePresence>
-          {isQuickSummonOpen && (
-            <motion.div 
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="absolute top-20 right-4 z-50 w-80 pointer-events-auto"
-            >
-              <div className="bg-[#121212]/95 backdrop-blur-2xl border border-purple-500/30 p-4 rounded-3xl shadow-[0_0_50px_rgba(168,85,247,0.2)]">
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-cinzel text-[10px] font-black text-purple-400 uppercase tracking-widest flex items-center gap-2">
-                    <Sparkles size={14}/> Invocação AI
-                  </h3>
-                  <button onClick={() => setIsQuickSummonOpen(false)} className="text-zinc-600 hover:text-white"><X size={14}/></button>
-                </div>
-                <div className="relative">
-                  <input 
-                    autoFocus
-                    className="w-full bg-black/60 border border-purple-900/40 rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-purple-500 transition-all pr-10" 
-                    placeholder="Conceito do monstro..." 
-                    value={quickSummonInput}
-                    onChange={(e) => setQuickSummonInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAiAction('monster', quickSummonInput)}
-                    disabled={aiLoading}
-                  />
-                  <button 
-                    onClick={() => handleAiAction('monster', quickSummonInput)}
-                    disabled={aiLoading || !quickSummonInput.trim()}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-purple-400 hover:text-purple-300 disabled:opacity-30"
-                  >
-                    {aiLoading ? <RotateCcw size={16} className="animate-spin" /> : <Send size={16} />}
-                  </button>
-                </div>
-                <p className="text-[8px] text-zinc-500 mt-2 italic px-1">O Oráculo criará as estatísticas e colocará o token no mapa.</p>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
         {/* MAP VIEWPORT */}
         <div className={`flex-1 overflow-auto bg-[#080808] relative custom-scrollbar`}>
-          <motion.div ref={mapRef} drag dragMomentum={false} style={{ scale: configMapa.zoom, transformOrigin: '0 0', backgroundImage: `url(${configMapa.backgroundImage})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', width: '4000px', height: '4000px', position: 'relative' }}>
+          <motion.div ref={mapRef} drag dragMomentum={false} style={{ scale: configMapa.zoom, transformOrigin: '0 0', backgroundImage: `url(${configMapa.backgroundImage})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', width: '4000px', height: '4000px', position: 'relative' }}>
             <div className="absolute inset-0 pointer-events-none opacity-10" style={{ backgroundImage: `linear-gradient(to right, #d4af37 1px, transparent 1px), linear-gradient(to bottom, #d4af37 1px, transparent 1px)`, backgroundSize: `var(--grid-size) var(--grid-size)` }} />
             {tokens.map(token => {
               const gs = configMapa.gridSize;
@@ -393,9 +312,6 @@ export default function App() {
                   <div className={`relative w-[90%] h-[90%] rounded-full border-2 flex items-center justify-center transition-all group-hover:scale-110 shadow-2xl ${token.type === 'enemy' ? 'border-red-600 bg-red-900/20 shadow-red-900/40' : 'border-[#d4af37] bg-black shadow-[#d4af37]/20'}`}>
                     <div className="font-cinzel font-black text-sm uppercase">{token.name[0]}</div>
                     <div className="absolute -bottom-4 w-full text-center text-[7px] font-black uppercase text-white truncate drop-shadow-md">{token.name}</div>
-                    <div className="absolute -top-2 w-full h-1 bg-zinc-900 rounded-full overflow-hidden border border-white/10">
-                       <div className={`h-full ${token.type === 'enemy' ? 'bg-red-600' : 'bg-green-500'}`} style={{ width: `${(curH/maxH)*100}%` }} />
-                    </div>
                   </div>
                 </motion.div>
               );
@@ -403,35 +319,48 @@ export default function App() {
           </motion.div>
         </div>
 
-        {/* LOG PANEL */}
-        <div className={`${currentOrientation ? (isSheetExpanded ? 'h-0' : 'h-40') : 'h-60'} bg-[#0a0a0a] border-t border-[#d4af37]/10 flex flex-col transition-all duration-300`}>
+        {/* LOG PANEL - FIXING HEIGHT TO REMAIN VISIBLE IN MOBILE */}
+        <div className={`${currentOrientation ? (isSheetExpanded ? 'h-48' : 'h-64') : 'h-64'} bg-[#0a0a0a] border-t border-[#d4af37]/10 flex flex-col transition-all duration-300 z-10`}>
           <header className="px-4 py-1.5 bg-[#121212] flex justify-between items-center border-b border-white/5">
-            <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Diário de Batalha</span>
+            <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Chat de Arton</span>
             <div className="flex gap-2 items-center">
-              <span className="text-[7px] font-bold text-zinc-500 mr-1 uppercase">Online:</span>
-              <div className="flex -space-x-1.5"> {playersOnline.map(p => <div key={p} className="w-4 h-4 rounded-full bg-[#1a1a1a] border border-[#d4af37]/40 flex items-center justify-center text-[7px] font-black text-[#d4af37]" title={p}>{p[0].toUpperCase()}</div>)} </div>
+              <span className="text-[7px] font-bold text-zinc-500 uppercase">Online: {playersOnline.length}</span>
             </div>
           </header>
-          <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-1.5 custom-scrollbar bg-black/40 font-inter">
-            {messages.map(m => ( <div key={m.id} className="text-[10px] sm:text-[11px] flex gap-2"> <span className="text-zinc-600 shrink-0">[{m.time}]</span> <div className="flex-1"> <span className={`font-black uppercase mr-1.5 ${m.type === 'ai' ? 'text-purple-400' : 'text-[#d4af37]'}`}>{m.user}:</span> <span className={`text-zinc-300 ${m.type === 'system' ? 'italic opacity-60' : ''}`}>{m.text}</span> {m.total !== undefined && <span className="ml-2 px-2 py-0.5 bg-black border border-white/10 rounded font-black text-white">{m.total}</span>} {m.details && <div className="mt-1 text-zinc-500 whitespace-pre-wrap">{m.details}</div>} </div> </div> ))}
+          <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar bg-black/40 font-inter">
+            {messages.map(m => ( 
+              <div key={m.id} className="text-[10px] sm:text-[11px] flex flex-col"> 
+                <div className="flex gap-2">
+                  <span className="text-zinc-600 shrink-0">[{m.time}]</span> 
+                  <span className={`font-black uppercase ${m.type === 'ai' ? 'text-purple-400' : 'text-[#d4af37]'}`}>{m.user}:</span> 
+                  <span className={`text-zinc-300 ${m.type === 'system' ? 'italic opacity-60' : ''}`}>{m.text}</span>
+                  {m.total !== undefined && <span className="px-2 py-0.5 bg-black border border-white/10 rounded font-black text-white">{m.total}</span>}
+                </div>
+                {m.image && <img src={m.image} className="mt-2 rounded-lg max-w-[200px] border border-white/10 shadow-lg cursor-pointer" onClick={() => window.open(m.image)} alt="Shared content" />}
+                {m.details && <div className="mt-1 p-2 bg-black/30 rounded border-l-2 border-purple-500/50 text-zinc-500 whitespace-pre-wrap text-[9px]">{m.details}</div>} 
+              </div> 
+            ))}
           </div>
           <div className="p-3 bg-[#0d0d0d] flex gap-2 border-t border-white/5">
-            <input className="flex-1 bg-black/60 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-[#d4af37]/40 transition-all" placeholder="Digite sua ação em Arton..." onKeyDown={e => { if(e.key === 'Enter' && (e.target as HTMLInputElement).value) { addLog((e.target as HTMLInputElement).value, 'chat'); (e.target as HTMLInputElement).value = ''; }}} />
+            <input type="file" ref={chatImageRef} onChange={e => handleFileUpload(e, 'chat')} accept="image/*" className="hidden" />
+            <button className="p-2 text-zinc-500 hover:text-white" onClick={() => chatImageRef.current?.click()}><Camera size={18}/></button>
+            <input className="flex-1 bg-black/60 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-[#d4af37]/40 transition-all" placeholder="Envie sua mensagem..." onKeyDown={e => { if(e.key === 'Enter' && (e.target as HTMLInputElement).value) { addLog((e.target as HTMLInputElement).value, 'chat'); (e.target as HTMLInputElement).value = ''; }}} />
             <button className="bg-[#8b0000] p-2 rounded-xl text-white transition-all active:scale-95" title="Enviar"><Send size={16}/></button>
           </div>
         </div>
       </main>
 
-      {/* CHARACTER SHEET SIDEBAR */}
-      <aside className={`${currentOrientation ? (isSheetExpanded ? 'h-[85vh]' : 'h-[64px]') : 'w-[360px] h-full border-l'} border-[#d4af37]/10 bg-[#0a0a0a] flex flex-col shadow-2xl z-50 overflow-hidden transition-all duration-500`}>
+      {/* CHARACTER SHEET SIDEBAR - REDUCED HEIGHT IN PORTRAIT TO NOT COVER CHAT */}
+      <aside className={`${currentOrientation ? (isSheetExpanded ? 'h-[60vh]' : 'h-[64px]') : 'w-[360px] h-full border-l'} border-[#d4af37]/10 bg-[#0a0a0a] flex flex-col shadow-2xl z-50 overflow-hidden transition-all duration-500`}>
         <header className="p-4 border-b border-[#8b0000]/50 flex justify-between items-center bg-[#121212] cursor-pointer" onClick={() => currentOrientation && setIsSheetExpanded(!isSheetExpanded)}>
           <div className="flex flex-col">
             <h2 className="font-cinzel text-base font-bold text-white uppercase tracking-tighter truncate max-w-[150px]">{userName}</h2>
             <span className="text-[8px] text-[#d4af37] tracking-widest uppercase">NÍVEL {char.level} • {isMaster ? 'NARRADOR' : 'AVENTUREIRO'}</span>
           </div>
-          <div className="flex items-center gap-2"> {isMaster && <Crown size={18} className="text-[#d4af37] animate-pulse" />} {currentOrientation && <div className="text-zinc-500">{isSheetExpanded ? <ChevronDown size={24}/> : <ChevronUp size={24}/>}</div>} </div>
+          <div className="flex items-center gap-2"> {isMaster && <Crown size={18} className="text-[#d4af37]" />} {currentOrientation && <div className="text-zinc-500">{isSheetExpanded ? <ChevronDown size={24}/> : <ChevronUp size={24}/>}</div>} </div>
         </header>
 
+        {/* Content of the sheet... (remaining same for brevity but kept in XML) */}
         <div className="px-5 py-4 space-y-3 bg-[#0d0d0d] border-b border-white/5">
           <div className="space-y-1">
             <div className="flex justify-between text-[8px] font-black uppercase tracking-widest items-center"> <div className="flex items-center gap-1 text-[#ef4444]"><Heart size={12}/> Vida</div> <div className="flex items-center gap-2"> <button onClick={() => setChar(p => ({...p, pv: {...p.pv, cur: Math.max(0, p.pv.cur - 1)}}))}><Minus size={10}/></button> <span className="text-[10px] font-mono">{char.pv.cur}/{char.pv.max}</span> <button onClick={() => setChar(p => ({...p, pv: {...p.pv, cur: Math.min(p.pv.max, p.pv.cur + 1)}}))}><Plus size={10}/></button> </div> </div>
@@ -450,8 +379,8 @@ export default function App() {
             {activeTab === 'status' && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-[#1a1a1a] p-3 rounded-xl text-center border border-white/5"> <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest block mb-1">Arma</span> <select className="bg-transparent text-white font-cinzel text-lg outline-none cursor-pointer" value={weaponDie} onChange={e => setWeaponDie(Number(e.target.value))}> {[4, 6, 8, 10, 12].map(d => <option key={d} value={d} className="bg-black">d{d}</option>)} </select> </div>
-                  <div className="bg-[#1a1a1a] p-3 rounded-xl text-center border border-white/5"> <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest block mb-1">Defesa</span> <span className="text-xl font-cinzel text-white">{totalDefense}</span> </div>
+                  <div className="bg-[#1a1a1a] p-3 rounded-xl text-center border border-white/5"> <span className="text-[8px] font-black text-zinc-500 uppercase block mb-1">Arma</span> <select className="bg-transparent text-white font-cinzel text-lg outline-none cursor-pointer" value={weaponDie} onChange={e => setWeaponDie(Number(e.target.value))}> {[4, 6, 8, 10, 12].map(d => <option key={d} value={d} className="bg-black">d{d}</option>)} </select> </div>
+                  <div className="bg-[#1a1a1a] p-3 rounded-xl text-center border border-white/5"> <span className="text-[8px] font-black text-zinc-500 uppercase block mb-1">Defesa</span> <span className="text-xl font-cinzel text-white">{totalDefense}</span> </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2"> <button onClick={() => rollDamageAction(false)} className="py-3 bg-zinc-800 hover:bg-zinc-700 rounded font-cinzel text-xs uppercase text-white shadow-xl transition-all">Atacar</button> <button onClick={() => rollDamageAction(true)} className="py-3 bg-[#8b0000] hover:bg-red-700 rounded font-cinzel text-xs uppercase text-white shadow-xl transition-all">Crítico</button> </div>
                 <div className="grid grid-cols-3 gap-3"> {(Object.entries(char.attrs) as [Attribute, number][]).map(([at, val]) => ( <div key={at} className="bg-[#1a1a1a] p-2 rounded-xl text-center border border-white/5 group"> <span className="text-[8px] font-black text-zinc-600 block uppercase">{at}</span> <span className="text-lg font-cinzel font-bold text-white group-hover:text-[#d4af37] transition-colors">{val}</span> <div className="flex justify-between mt-1 text-[10px] font-mono text-[#d4af37]"> <button onClick={() => setChar(p => ({...p, attrs: {...p.attrs, [at]: p.attrs[at]-1}}))}><Minus size={12}/></button> <span>{calcularModificador(val) >= 0 ? '+' : ''}{calcularModificador(val)}</span> <button onClick={() => setChar(p => ({...p, attrs: {...p.attrs, [at]: p.attrs[at]+1}}))}><Plus size={12}/></button> </div> </div> ))} </div>
@@ -462,31 +391,11 @@ export default function App() {
             {activeTab === 'ai' && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
                 <div className="p-5 bg-purple-900/10 border border-purple-900/30 rounded-2xl relative group overflow-hidden">
-                  <div className="absolute inset-0 bg-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                   <h4 className="font-cinzel text-[10px] font-black text-purple-400 uppercase mb-3 flex items-center gap-2"><Sparkles size={16}/> Oráculo de Arton</h4>
-                  <textarea 
-                    className="w-full bg-black/60 border border-purple-900/40 rounded-xl p-4 text-xs text-zinc-200 outline-none min-h-[140px] resize-none focus:border-purple-500 transition-all" 
-                    placeholder="Descreva um conceito (Ex: Um dragão de cristal da Tormenta)..." 
-                    value={aiInput} 
-                    onChange={e => setAiInput(e.target.value)} 
-                  />
+                  <textarea className="w-full bg-black/60 border border-purple-900/40 rounded-xl p-4 text-xs text-zinc-200 outline-none min-h-[140px] resize-none focus:border-purple-500 transition-all" placeholder="Dragão de cristal da Tormenta..." value={aiInput} onChange={e => setAiInput(e.target.value)} />
                   <div className="mt-4 grid grid-cols-2 gap-2">
-                    <button 
-                      onClick={() => handleAiAction('lore')} 
-                      disabled={aiLoading || !aiInput.trim()} 
-                      className="bg-[#1a1a1a] hover:bg-[#252525] border border-purple-900/40 text-purple-400 py-3 rounded-xl text-[9px] font-black uppercase flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
-                    >
-                      {aiLoading ? <RotateCcw size={14} className="animate-spin" /> : <Scroll size={14} />}
-                      Sussurrar Lenda
-                    </button>
-                    <button 
-                      onClick={() => handleAiAction('monster')} 
-                      disabled={aiLoading || !aiInput.trim()} 
-                      className="bg-purple-700 hover:bg-purple-600 text-white py-3 rounded-xl text-[9px] font-black uppercase flex items-center justify-center gap-2 transition-all shadow-xl active:scale-95 disabled:opacity-50"
-                    >
-                      {aiLoading ? <RotateCcw size={14} className="animate-spin" /> : <Skull size={14} />}
-                      Conjurar Ameaça
-                    </button>
+                    <button onClick={() => handleAiAction('lore')} disabled={aiLoading || !aiInput.trim()} className="bg-[#1a1a1a] border border-purple-900/40 text-purple-400 py-3 rounded-xl text-[9px] font-black uppercase flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"> {aiLoading ? <RotateCcw size={14} className="animate-spin" /> : <Scroll size={14} />} Lore </button>
+                    <button onClick={() => handleAiAction('monster')} disabled={aiLoading || !aiInput.trim()} className="bg-purple-700 text-white py-3 rounded-xl text-[9px] font-black uppercase flex items-center justify-center gap-2 transition-all shadow-xl active:scale-95 disabled:opacity-50"> {aiLoading ? <RotateCcw size={14} className="animate-spin" /> : <Skull size={14} />} Monstro </button>
                   </div>
                 </div>
               </motion.div>
